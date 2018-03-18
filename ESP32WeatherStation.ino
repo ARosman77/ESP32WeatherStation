@@ -3,16 +3,48 @@
  */
 
 #include <WiFi.h>
+#include <ESPmDNS.h>
+#include <ESP32WebServer.h>
+#include <WiFiClient.h>
+#include <Preferences.h>
+#include <Ticker.h>
 #include <BME280I2C.h>
 #include <Wire.h>
-#include <Ticker.h>
 
-// set corrrect values
-// TODO: move to EEPROM, and fill over AP
-const char* ssid     = "...........";
-const char* password = "...........";
+// indicator LED
+const byte BLUE_LED = 2;
+#define blueLEDInit()   pinMode(BLUE_LED, OUTPUT);
+#define blueLEDOn()     digitalWrite(BLUE_LED,0)
+#define blueLEDOff()    digitalWrite(BLUE_LED,1)
+#define blueLEDToggle() digitalWrite(BLUE_LED, !digitalRead(BLUE_LED))
+Ticker blueLEDBlinker;
+// inidication blink timings
+const unsigned int IND_BLINK_AP_MODE_ms = 100;        // very quick blinking when in AP mode
+const unsigned int IND_BLINK_WIFI_SEARCH_ms = 500;    // quick blinking when connecting to wifi
+const unsigned int IND_BLINK_SENSOR_ERROR_ms = 1000;  // slow blinking when checking sensors
+// ticker callbacks
+void blinkBlueLED() { blueLEDToggle(); }
 
-// set BME280 sensor
+// Preferences = NVM storage
+Preferences ESP32_NVMSettings;
+const char *ESP32_namespace = "ESP32ap";
+const char *ESP32_ssid_setting = "ssis";
+const char *ESP32_pass_setting = "pass";
+const char *ESP32_mode_setting = "mode";
+
+// Working modes
+enum ESP32_mode { MODE_AP, MODE_CLIENT } wifiMode = MODE_AP;
+enum Sensor_mode { SENSE_NONE, SENSE_BME280, SENSE_BMP280 } senseMode = SENSE_NONE;
+
+// default ssid and password for AP
+const char *AP_ssid = "ESP32ap";
+const char *AP_pass = "12345678";
+
+// ssid and password for WIFI client
+String CL_ssid;
+String CL_pass;
+
+// BME280 sensor settings
 BME280I2C::Settings settings(
    BME280::OSR_X16,
    BME280::OSR_X16,
@@ -23,222 +55,304 @@ BME280I2C::Settings settings(
    BME280::SpiEnable_False,
    0x76 // I2C address. I2C specific.
 );
-
 BME280I2C bme(settings);
-//BME280I2C bme;
+const int UPDATE_INTERVAL_s = 10;
+Ticker bmeDataUpdater;
 
-WiFiServer server(80);
-WiFiUDP udpInterface;
-const byte BLUE_LED = 2;
-const int UPDATE_INTERVAL = 10;
-Ticker blinker;
-Ticker updater;
-
-void blinkBlueLED() 
-{
-  digitalWrite(BLUE_LED, !digitalRead(BLUE_LED));
-}
-
-void updateData()
+void bmeUpdateData()
 {
   float temp(NAN), hum(NAN), pres(NAN);
 
-   BME280::TempUnit tempUnit(BME280::TempUnit_Celsius);
-   BME280::PresUnit presUnit(BME280::PresUnit_hPa);
+  BME280::TempUnit tempUnit(BME280::TempUnit_Celsius);
+  BME280::PresUnit presUnit(BME280::PresUnit_hPa);
+  
+  bme.read(pres, temp, hum, tempUnit, presUnit);
+  
+  Serial.print("Temp: ");
+  Serial.print(temp);
+  Serial.print("°"+ String(tempUnit == BME280::TempUnit_Celsius ? 'C' :'F'));
+  Serial.print("\t\tHumidity: ");
+  Serial.print(hum);
+  Serial.print("% RH");
+  Serial.print("\t\tPressure: ");
+  Serial.print(pres);
+  Serial.println("hPa");
 
-   bme.read(pres, temp, hum, tempUnit, presUnit);
+  /*
+  // deep sleep after update data
+  Serial.println("Going to deep sleep...");
+  digitalWrite(BLUE_LED, 1);      // turn OFF LED
+  ESP.deepSleep(1000*1000*60); // go to sleep for 60s
+  */
+}
 
-   Serial.print("Temp: ");
-   Serial.print(temp);
-   Serial.print("°"+ String(tempUnit == BME280::TempUnit_Celsius ? 'C' :'F'));
-   Serial.print("\t\tHumidity: ");
-   Serial.print(hum);
-   Serial.print("% RH");
-   Serial.print("\t\tPressure: ");
-   Serial.print(pres);
-   Serial.println("hPa");
+// web server at address 80
+ESP32WebServer webServer(80);
 
-   // deep sleep after update data
-   Serial.println("Going to deep sleep...");
-   digitalWrite(BLUE_LED, 1);      // turn OFF LED
-   ESP.deepSleep(1000*1000*60); // go to sleep for 60s
+// simple web page with forms
+const char *AP_WEB_PAGE_HTML = 
+"<!DOCTYPE html>\n"
+"<html>\n"
+"<body>\n"
+"<h1 style=\"color:blue;margin-left:30px;\">\n"
+"\tESP32 WiFi Settings\n"
+"</h1>\n"
+"<form action=\"/submit\" method=\"post\">\n"
+"    <table>\n"
+"    <tr>\n"
+"    <td><label class=\"label\">Network Name : </label></td>\n"
+"    <td><input type = \"text\" name = \"ssid\"/></td>\n"
+"    </tr>\n"
+"    <tr>\n"
+"    <td><label>Password : </label></td>\n"
+"    <td><input type = \"text\" name = \"pass\"/></td>\n"
+"    </tr>\n"
+"    <tr>\n"
+"    <td align=\"center\" colspan=\"2\"><input style=\"color:blue;margin-left:auto;margin-right:auto;\" type=\"submit\" value=\"Submit\"></td>\n"
+"    </tr>\n"
+"    </table>\n"
+"</form>\n"
+"</body>\n"
+"</html>";
+
+const char *CL_WEB_PAGE_HTML = 
+"<!DOCTYPE html>\n"
+"<html>\n"
+"<body>\n"
+"<h1 align=\"center\" style=\"color:blue;margin-left:30px;\">\n"
+"\tESP32 Weatherstation\n"
+"</h1>\n"
+"<table align=\"center\">\n"
+"\t<tr>\n"
+"    \t<th colspan=\"2\" align=\"center\">BME280 sensor</th>\n"
+"    </tr>\n"
+"    <tr>\n"
+"    \t<td>Temperature</td>\n"
+"    \t<td align=\"right\">20°C</td>\n"
+"    </tr>\n"
+"    <tr>\n"
+"    \t<td>Humidity</td>\n"
+"    \t<td align=\"right\">35%</td>\n"
+"    </tr>\n"
+"    <tr>\n"
+"    \t<td>Atmospheric pressure</td>\n"
+"    \t<td align=\"right\">900hPa</td>\n"
+"    </tr>\n"
+"    <tr>\n"
+"    \t<form align action=\"/submit\" method=\"post\">\n"
+"    \t<td align=\"center\"><input style=\"color:blue;\" type=\"submit\" value=\"Refresh\"></td>\n"
+"        <td align=\"center\"><input style=\"color:red;\" type=\"submit\" value=\"Reset Settings\"></td>\n"
+"        </form>\n"
+"    </tr>\n"
+"</table>\n"
+"</body>\n"
+"</html>";
+
+// web server callbacks
+void handleAPRoot()
+{
+  webServer.send(200,"text/html",AP_WEB_PAGE_HTML);
+}
+
+void handleCLRoot()
+{
+  webServer.send(200,"text/html",CL_WEB_PAGE_HTML);
+}
+
+void handleAPOnSubmit()
+{
+  webServer.send(200, "text/plain", "Form submited! Restarting...");
+  Serial.print("Form submitted with: ");
+  Serial.print(webServer.arg("ssid"));
+  Serial.print(" and ");
+  Serial.println(webServer.arg("pass"));
+  ESP32_NVMSettings.putString(ESP32_ssid_setting,webServer.arg("ssid"));
+  ESP32_NVMSettings.putString(ESP32_pass_setting,webServer.arg("pass"));
+  ESP32_NVMSettings.putUChar(ESP32_mode_setting,MODE_CLIENT);
+  blueLEDOff();
+  ESP.restart();
+}
+
+void handleCLOnSubmit()
+{
+  webServer.send(200, "text/plain", "Settings cleared! Restarting...");
+  ESP32_NVMSettings.clear();
+  ESP32_NVMSettings.putUChar(ESP32_mode_setting,MODE_AP);
+  blueLEDOff();
+  ESP.restart();
+}
+
+void handleNotFound()
+{
+  String message = "File Not Found\n\n";
+  webServer.send(404, "text/plain", message);
 }
 
 void setup()
 {
-    Serial.begin(115200);
-    pinMode(BLUE_LED, OUTPUT);      // set the LED pin mode
-    digitalWrite(BLUE_LED, 1);      // turn OFF LED
-    delay(10);
+  // initialize LED indicator
+  blueLEDInit();
+  blueLEDOff();
 
-    // start I2C interface
-    Wire.begin(21,22,100000);
-    delay(10);
+  // initialize debug port
+  Serial.begin(115200);
+  Serial.println();
 
-    // find BME280 sensor
-    int nTimeOutCnt = 0;
-    blinker.attach(1, blinkBlueLED);
-    while(!bme.begin())
+  // initialize preferences
+  ESP32_NVMSettings.begin(ESP32_namespace, false);
+
+  // print values
+  Serial.println("Reading preferences...");
+  CL_ssid = ESP32_NVMSettings.getString(ESP32_ssid_setting,"");
+  CL_pass = ESP32_NVMSettings.getString(ESP32_pass_setting,"");
+  wifiMode = (ESP32_mode)ESP32_NVMSettings.getUChar(ESP32_mode_setting,MODE_AP);
+  Serial.print("SSID : ");
+  Serial.println(CL_ssid);
+  Serial.print("Password : ");
+  Serial.println(CL_pass);
+  Serial.print("wifiMode : ");
+  
+  switch (wifiMode)
+  {
+    case MODE_CLIENT:
+      Serial.println("MODE_CLIENT");
+      setup_CL();
+      break;
+    default:
+    case MODE_AP:
+      Serial.println("MODE_AP");
+      blueLEDBlinker.attach_ms(IND_BLINK_AP_MODE_ms,blinkBlueLED);
+      setup_AP();
+      break;
+  }
+
+  // inidcate init done
+  blueLEDOn();
+}
+
+// start in AP mode
+void setup_AP()
+{
+  // start AP
+  Serial.println("Configuring access point...");
+  WiFi.softAP(AP_ssid, AP_pass);
+  IPAddress AP_IP = WiFi.softAPIP();
+  Serial.print("AP IP address: ");
+  Serial.println(AP_IP);
+
+  // setup mDNS
+  if (MDNS.begin("esp32"))
+  {
+    Serial.println("MDNS responder started...");
+  }
+
+  // register web server callback functions
+  webServer.on("/",handleAPRoot);
+  webServer.onNotFound(handleNotFound);
+  webServer.on("/submit",HTTP_POST,handleAPOnSubmit);
+
+  // start web server
+  webServer.begin();
+  Serial.println("HTTP server started...");
+}
+
+// start in client mode
+void setup_CL()
+{
+  // try connecting to a WiFi network
+  blueLEDBlinker.attach_ms(IND_BLINK_WIFI_SEARCH_ms,blinkBlueLED);
+  Serial.println();
+  Serial.print("Connecting to ");
+  Serial.println(CL_ssid.c_str());
+  
+  int nTimeOutCnt = 0;
+  WiFi.begin(CL_ssid.c_str(), CL_pass.c_str());
+  while (WiFi.status() != WL_CONNECTED)
+  {
+    delay(500);
+    Serial.print(".");
+    nTimeOutCnt++;
+    if(nTimeOutCnt>120)
     {
-      Serial.println("Could not find BME280 sensor!");
-      delay(1000);
-      nTimeOutCnt++;
-      if(nTimeOutCnt>30)
-      {
-        // deep sleep if sensor is not found
-        Serial.println("Going to deep sleep...");
-        digitalWrite(BLUE_LED, 1);      // turn OFF LED
-        ESP.deepSleep(1000*1000*60);    // go to sleep for 60s
-      }
+      Serial.println("Can not connect to AP ...");
+      Serial.println("Switching to AP mode for settings ...");
+      ESP32_NVMSettings.putUChar(ESP32_mode_setting,MODE_AP);
+      blueLEDOff();
+      ESP.restart();
     }
-    blinker.detach();
+  }
 
-    // check which sesor we found
+  Serial.println("");
+  Serial.println("WiFi connected.");
+  Serial.println("IP address: ");
+  Serial.println(WiFi.localIP());
+  blueLEDBlinker.detach();
+  
+  // start I2C interface
+  Wire.begin(21,22,100000);
+  delay(100);
+  
+  // find BME280 sensor
+  nTimeOutCnt = 0;
+  blueLEDBlinker.attach_ms(IND_BLINK_SENSOR_ERROR_ms,blinkBlueLED);
+  senseMode = SENSE_BME280;
+  while(!bme.begin())
+  {
+    Serial.println("Could not find BME280 sensor!");
+    delay(1000);
+    nTimeOutCnt++;
+    if(nTimeOutCnt>5)
+    {
+      senseMode = SENSE_NONE;
+      break;
+      // deep sleep if sensor is not found
+      // Serial.println("Going to deep sleep...");
+      // digitalWrite(BLUE_LED, 1);      // turn OFF LED
+      // ESP.deepSleep(1000*1000*60);    // go to sleep for 60s
+    }
+  }
+
+  // check which sesor we found
+  if (senseMode!=SENSE_NONE)
+  {
     switch(bme.chipModel())
     {
       case BME280::ChipModel_BME280:
         Serial.println("Found BME280 sensor! Success.");
+        senseMode = SENSE_BME280;
         break;
       case BME280::ChipModel_BMP280:
         Serial.println("Found BMP280 sensor! No Humidity available.");
+        senseMode = SENSE_BMP280;
         break;
       default:
+        senseMode=SENSE_NONE;
         Serial.println("Found UNKNOWN sensor! Error!");
-     }
-
-    // We start by connecting to a WiFi network
-
-    Serial.println();
-    Serial.println();
-    Serial.print("Connecting to ");
-    Serial.println(ssid);
-
-    nTimeOutCnt = 0;
-    WiFi.begin(ssid, password);
-    blinker.attach(0.2, blinkBlueLED);
-    while (WiFi.status() != WL_CONNECTED)
-    {
-        delay(500);
-        Serial.print(".");
-        nTimeOutCnt++;
-        if(nTimeOutCnt>120)
-        {
-          // deep sleep if it can not connect to WiFi
-          Serial.println("Going to deep sleep...");
-          digitalWrite(BLUE_LED, 1);      // turn OFF LED
-          ESP.deepSleep(1000*1000*60);    // go to sleep for 60s
-        }
     }
+  }
+  // attach data updates
+  if (senseMode!=SENSE_NONE) bmeDataUpdater.attach(UPDATE_INTERVAL_s,bmeUpdateData);
+  blueLEDBlinker.detach();
 
-    Serial.println("");
-    Serial.println("WiFi connected.");
-    Serial.println("IP address: ");
-    Serial.println(WiFi.localIP());
-    blinker.detach();
-    server.begin();
+  // setup mDNS
+  if (MDNS.begin("esp32"))
+  {
+    Serial.println("MDNS responder started...");
+  }
 
-    udpInterface.begin(12123);
+  // register web server callback functions
+  webServer.on("/",handleCLRoot);
+  webServer.onNotFound(handleNotFound);
+  webServer.on("/submit",HTTP_POST,handleCLOnSubmit);
 
-    // everything started, begin sending weather data to server
-    updater.attach(UPDATE_INTERVAL, updateData);
-
-    digitalWrite(BLUE_LED, 0);      // turn ON LED
-
+  // start web server
+  webServer.begin();
+  Serial.println("HTTP server started...");
+  blueLEDOn();
+  
 }
 
-int value = 0;
-
-void loop(){
-
-  if (udpInterface.parsePacket()>0)
-  {
-    Serial.println("UDP Packet received ...");
-    while(udpInterface.available())
-    {
-      char c = udpInterface.read();    // receive a byte as character
-      Serial.print(c);                 // print the character
-    }
-    Serial.println("");
-    IPAddress remoteIP = udpInterface.remoteIP();
-    unsigned int remotePort = udpInterface.remotePort(); 
-    Serial.print("IP: ");
-    Serial.print(remoteIP);
-    Serial.print(":");
-    Serial.println(remotePort,DEC);
-
-    IPAddress testIP(255,255,255,255);
-
-    // try sending udp data
-    udpInterface.beginPacket(testIP,1024);
-    udpInterface.write(64);
-    udpInterface.write(65);
-    udpInterface.endPacket();
-  }
- 
-  WiFiClient client = server.available();   // listen for incoming clients
-
-  if (client) {                             // if you get a client,
-    Serial.println("New Client.");           // print a message out the serial port
-    String currentLine = "";                // make a String to hold incoming data from the client
-    while (client.connected()) {            // loop while the client's connected
-      if (client.available()) {             // if there's bytes to read from the client,
-        char c = client.read();             // read a byte, then
-        Serial.write(c);                    // print it out the serial monitor
-        if (c == '\n') {                    // if the byte is a newline character
-
-          // if the current line is blank, you got two newline characters in a row.
-          // that's the end of the client HTTP request, so send a response:
-          if (currentLine.length() == 0) {
-            // HTTP headers always start with a response code (e.g. HTTP/1.1 200 OK)
-            // and a content-type so the client knows what's coming, then a blank line:
-            client.println("HTTP/1.1 200 OK");
-            client.println("Content-type:text/html");
-            client.println();
-
-            // Show weather station info
-            // temp = bme.temp() hum = bme.hum() pres = bme.pres()
-            float temp(NAN), hum(NAN), pres(NAN);
-
-            BME280::TempUnit tempUnit(BME280::TempUnit_Celsius);
-            BME280::PresUnit presUnit(BME280::PresUnit_hPa);
-
-            bme.read(pres, temp, hum, tempUnit, presUnit);
-
-            client.print("<H3>Temperatura : ");
-            client.print(temp);
-            client.print("°C</H3>");
-            client.print("<H3>Vlaga : ");
-            client.print(hum);
-            client.print("% </H3>");
-            client.print("<H3>Zračni tlak : ");
-            client.print(pres);
-            client.print(" hPa </H3>");
-            // the content of the HTTP response follows the header:
-            client.print("Click <a href=\"/H\">here</a> to turn the LED on pin 5 on.<br>");
-            client.print("Click <a href=\"/L\">here</a> to turn the LED on pin 5 off.<br>");
-
-            // The HTTP response ends with another blank line:
-            client.println();
-            // break out of the while loop:
-            break;
-          } else {    // if you got a newline, then clear currentLine:
-            currentLine = "";
-          }
-        } else if (c != '\r') {  // if you got anything else but a carriage return character,
-          currentLine += c;      // add it to the end of the currentLine
-        }
-
-        // Check to see if the client request was "GET /H" or "GET /L":
-        if (currentLine.endsWith("GET /H")) {
-          digitalWrite(BLUE_LED, LOW);               // GET /H turns the LED on
-        }
-        if (currentLine.endsWith("GET /L")) {
-          digitalWrite(BLUE_LED, HIGH);                // GET /L turns the LED off
-        }
-      }
-    }
-    // close the connection:
-    client.stop();
-    Serial.println("Client Disconnected.");
-  }
+void loop()
+{
+  webServer.handleClient();
 }
