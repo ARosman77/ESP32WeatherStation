@@ -115,7 +115,7 @@ const char *AP_WEB_PAGE_HTML =
 "</body>\n"
 "</html>";
 
-const char *CL_WEB_PAGE_HTML = 
+const String CL_WEB_PAGE_HTML_BF_TEMP = 
 "<!DOCTYPE html>\n"
 "<html>\n"
 "<body>\n"
@@ -127,16 +127,19 @@ const char *CL_WEB_PAGE_HTML =
 "    \t<th colspan=\"2\" align=\"center\">BME280 sensor</th>\n"
 "    </tr>\n"
 "    <tr>\n"
-"    \t<td>Temperature</td>\n"
-"    \t<td align=\"right\">20°C</td>\n"
+"    \t<td>Temperature</td>\n";
+
+const String CL_WEB_PAGE_HTML_BF_HUM = 
 "    </tr>\n"
 "    <tr>\n"
-"    \t<td>Humidity</td>\n"
-"    \t<td align=\"right\">35%</td>\n"
+"    \t<td>Humidity</td>\n";
+
+const String CL_WEB_PAGE_HTML_BF_PRES = 
 "    </tr>\n"
 "    <tr>\n"
-"    \t<td>Atmospheric pressure</td>\n"
-"    \t<td align=\"right\">900hPa</td>\n"
+"    \t<td>Atmospheric pressure</td>\n";
+
+const String CL_WEB_PAGE_HTML_END = 
 "    </tr>\n"
 "    <tr>\n"
 "    \t<form align action=\"/submit\" method=\"post\">\n"
@@ -156,7 +159,33 @@ void handleAPRoot()
 
 void handleCLRoot()
 {
-  webServer.send(200,"text/html",CL_WEB_PAGE_HTML);
+  float temp(NAN), hum(NAN), pres(NAN);
+
+  BME280::TempUnit tempUnit(BME280::TempUnit_Celsius);
+  BME280::PresUnit presUnit(BME280::PresUnit_hPa);
+  
+  bme.read(pres, temp, hum, tempUnit, presUnit);
+
+  String page = CL_WEB_PAGE_HTML_BF_TEMP+
+                "\t<td align=\"right\">"+
+                String(temp,2)+
+                "°C</td>\n"+
+                CL_WEB_PAGE_HTML_BF_HUM+
+                "\t<td align=\"right\">"+
+                String(hum,2)+
+                "%</td>\n"+
+                CL_WEB_PAGE_HTML_BF_PRES+
+                "\t<td align=\"right\">"+
+                String(pres,2)+
+                "hPa</td>\n"+
+                CL_WEB_PAGE_HTML_END;
+  
+  webServer.send(200,"text/html",page);
+/*
+  "    \t<td align=\"right\">20°C</td>\n"
+  "    \t<td align=\"right\">35%</td>\n"
+  "    \t<td align=\"right\">900hPa</td>\n"
+*/
 }
 
 void handleAPOnSubmit()
