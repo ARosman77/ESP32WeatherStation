@@ -10,6 +10,7 @@
 #include <Ticker.h>
 #include <BME280I2C.h>
 #include <Wire.h>
+#include "MySensorsLib.h"
 
 // indicator LED
 const byte BLUE_LED = 2;
@@ -66,7 +67,10 @@ void bmeUpdateData()
   BME280::TempUnit tempUnit(BME280::TempUnit_Celsius);
   BME280::PresUnit presUnit(BME280::PresUnit_hPa);
   
-  bme.read(pres, temp, hum, tempUnit, presUnit);
+  // bme.read(pres, temp, hum, tempUnit, presUnit);
+  pres = 988.16;
+  hum = 30.23;
+  temp = 27.12;
   
   Serial.print("Temp: ");
   Serial.print(temp);
@@ -77,6 +81,20 @@ void bmeUpdateData()
   Serial.print("\t\tPressure: ");
   Serial.print(pres);
   Serial.println("hPa");
+
+  /* Test sending reports over UDP packed as MySensors messages */
+  MyMessage messageTemp(1,V_TEMP);
+  messageTemp.set(temp,2);
+  MyMessage messageHum(2,V_HUM);
+  messageHum.set(hum,2);
+  MyMessage messagePres(3,V_PRESSURE);
+  messagePres.set(pres,2);
+    
+  Serial.println("-- UDP Messages --");
+  Serial.println(messageTemp.protocolFormat());
+  Serial.println(messageHum.protocolFormat());
+  Serial.println(messagePres.protocolFormat());
+  Serial.println("-- END --");
 
   /*
   // deep sleep after update data

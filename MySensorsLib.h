@@ -42,9 +42,6 @@
 #define MY_CORE_VERSION         ((uint8_t)2)    //!< core version
 #define MY_CORE_MIN_VERSION ((uint8_t)2) //!< min core version required for compatibility
 
-char _fmtBuffer[MY_GATEWAY_MAX_SEND_LENGTH];
-char _convBuffer[MAX_PAYLOAD*2+1];
-
 /// @brief The command field (message-type) defines the overall properties of a message
 typedef enum {
   C_PRESENTATION      = 0,  //!< Sent by a node when they present attached sensors. This is usually done in presentation() at startup.
@@ -286,6 +283,9 @@ class MyMessage
 {
 private:
   char* getCustomString(char *buffer) const;
+  uint8_t protocolH2i(char c);
+  char _fmtBuffer[MY_GATEWAY_MAX_SEND_LENGTH];
+  char _convBuffer[MAX_PAYLOAD*2+1];
 
 public:
   // Constructors
@@ -326,7 +326,6 @@ public:
   // Formatting/parsing message for sending/receiving over UDP
   char * protocolFormat();
   bool protocolParse(char *inputString);
-  uint8_t protocolH2i(char c);
 
   // Setters for building message "on the fly"
   MyMessage& setType(uint8_t type);
