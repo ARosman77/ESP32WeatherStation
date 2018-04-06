@@ -261,6 +261,7 @@ typedef enum {
 
 
 // internal access for special fields
+#define miSetCommand(_command) BF_SET(command_ack_payload, _command, 0, 3) //!< Internal setter for command field
 #define miGetCommand() ((uint8_t)BF_GET(command_ack_payload, 0, 3)) //!< Internal getter for command field
 
 #define miSetLength(_length) BF_SET(version_length, _length, 3, 5) //!< Internal setter for length field
@@ -323,8 +324,8 @@ public:
   bool isAck() const;
 
   // Formatting/parsing message for sending/receiving over UDP
-  char * protocolFormat(MyMessage &message);
-  bool protocolParse(MyMessage &message, char *inputString);
+  char * protocolFormat();
+  bool protocolParse(char *inputString);
   uint8_t protocolH2i(char c);
 
   // Setters for building message "on the fly"

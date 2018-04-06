@@ -325,7 +325,7 @@ MyMessage& MyMessage::set(int16_t value)
   return *this;
 }
 
-bool MyMessage::protocolParse(MyMessage &message, char *inputString)
+bool MyMessage::protocolParse(char *inputString)
 {
   char *str, *p, *value=NULL;
   uint8_t bvalue[MAX_PAYLOAD];
@@ -340,20 +340,20 @@ bool MyMessage::protocolParse(MyMessage &message, char *inputString)
       ) {
     switch (i) {
     case 0: // Radio id (destination)
-      message.destination = atoi(str);
+      this->destination = atoi(str);
       break;
     case 1: // Child id
-      message.sensor = atoi(str);
+      this->sensor = atoi(str);
       break;
     case 2: // Message type
       command = atoi(str);
-      mSetCommand(message, command);
+      miSetCommand(command);
       break;
     case 3: // Should we request ack from destination?
-      mSetRequestAck(message, atoi(str)?1:0);
+      miSetRequestAck(atoi(str)?1:0);
       break;
     case 4: // Data type
-      message.type = atoi(str);
+      this->type = atoi(str);
       break;
     case 5: // Variable value
       if (command == C_STREAM) {
@@ -383,23 +383,23 @@ bool MyMessage::protocolParse(MyMessage &message, char *inputString)
   if (i < 5) {
     return false;
   }
-  message.sender = GATEWAY_ADDRESS;
-  message.last = GATEWAY_ADDRESS;
-  mSetAck(message, false);
+  this->sender = GATEWAY_ADDRESS;
+  this->last = GATEWAY_ADDRESS;
+  miSetAck(false);
   if (command == C_STREAM) {
-    message.set(bvalue, blen);
+    this->set(bvalue, blen);
   } else {
-    message.set(value);
+    this->set(value);
   }
   return true;
 }
 
-char * MyMessage::protocolFormat(MyMessage &message)
+char * MyMessage::protocolFormat()
 {
   snprintf_P(_fmtBuffer, MY_GATEWAY_MAX_SEND_LENGTH,
-             PSTR("%" PRIu8 ";%" PRIu8 ";%" PRIu8 ";%" PRIu8 ";%" PRIu8 ";%s\n"), message.sender,
-             message.sensor, (uint8_t)mGetCommand(message), (uint8_t)mGetAck(message), message.type,
-             message.getString(_convBuffer));
+             PSTR("%" PRIu8 ";%" PRIu8 ";%" PRIu8 ";%" PRIu8 ";%" PRIu8 ";%s\n"), this->sender,
+             this->sensor, (uint8_t)miGetCommand(), (uint8_t)miGetAck(), this->type,
+             this->getString(_convBuffer));
   return _fmtBuffer;
 }
 
