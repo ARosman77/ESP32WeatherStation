@@ -13,6 +13,9 @@
 #include <Wire.h>
 #include "MySensorsLib.h"
 
+// I2C issue, testing without sensors
+#define NO_SENSOR_TEST
+
 // indicator LED
 const byte BLUE_LED = 2;
 #define blueLEDInit()   pinMode(BLUE_LED, OUTPUT);
@@ -70,12 +73,14 @@ void sendMyMsgOverUDP(IPAddress ip, int port, MyMessage message)
   DataBuffer = message.protocolFormat();
   /* Test sending reports over UDP packed as MySensors messages */
   udpClient.beginPacket(ip,port);
-  for (int i=0;i<sizeof(DataBuffer);i++)
+  for (int i=0;i<MY_GATEWAY_MAX_SEND_LENGTH;i++)
   {
     if (DataBuffer[i]!='/n') udpClient.write((unsigned char)DataBuffer[i]);
     else break;
   }
   udpClient.endPacket();
+  Serial.print("PacketSent: ");
+  Serial.println(DataBuffer);
 }
 
 void bmeUpdateData()
@@ -85,8 +90,14 @@ void bmeUpdateData()
   BME280::TempUnit tempUnit(BME280::TempUnit_Celsius);
   BME280::PresUnit presUnit(BME280::PresUnit_hPa);
   
+  #ifdef NO_SENSOR_TEST
+  pres =  1000.00;
+  temp =  30.00;
+  hum =   90.00;
+  #else
   bme.read(pres, temp, hum, tempUnit, presUnit);
-    
+  #endif  
+  
   Serial.print("Temp: ");
   Serial.print(temp);
   Serial.print("°"+ String(tempUnit == BME280::TempUnit_Celsius ? 'C' :'F'));
@@ -111,6 +122,23 @@ void bmeUpdateData()
   sendMyMsgOverUDP(ipBCAddress,nBCPort,msgInit);
 
   // wait for ID, then begin presenting sensors
+  while (udpClient.parsePacket()==0);
+  Serial.print("Received packet of size ");
+  Serial.println(udpClient.available());
+  Serial.print("From ");
+  IPAddress remoteIp = udpClient.remoteIP();
+  Serial.print(remoteIp);
+  Serial.print(", port ");
+  Serial.println(udpClient.remotePort());
+  // read the packet into packetBufffer
+  char packetBuffer[MY_GATEWAY_MAX_SEND_LENGTH];
+  int len = udpClient.read(packetBuffer, MY_GATEWAY_MAX_SEND_LENGTH);
+  if (len > 0) 
+  {
+    packetBuffer[len] = 0;
+  }
+  Serial.println("Contents:");
+  Serial.println(packetBuffer);
 
   // update data messages
   MyMessage messageTemp(1,V_TEMP);
@@ -120,9 +148,9 @@ void bmeUpdateData()
   MyMessage messagePres(3,V_PRESSURE);
   messagePres.set(pres,2);
 
-  sendMyMsgOverUDP(ipBCAddress,nBCPort,messageTemp);
-  sendMyMsgOverUDP(ipBCAddress,nBCPort,messageHum);
-  sendMyMsgOverUDP(ipBCAddress,nBCPort,messagePres);
+  //sendMyMsgOverUDP(ipBCAddress,nBCPort,messageTemp);
+  //sendMyMsgOverUDP(ipBCAddress,nBCPort,messageHum);
+  //sendMyMsgOverUDP(ipBCAddress,nBCPort,messagePres);
     
   /*
   Serial.println("-- UDP Messages --");
@@ -414,8 +442,12 @@ void setup_CL()
     }
   }
   // attach data updates
+  #ifdef NO_SENSOR_TEST
+  bmeDataUpdater.attach(UPDATE_INTERVAL_s,bmeUpdateData);
+  #else
   if (senseMode!=SENSE_NONE) bmeDataUpdater.attach(UPDATE_INTERVAL_s,bmeUpdateData);
   blueLEDBlinker.detach();
+  #endif
 
   // start UDP Client
   if (udpClient.begin(9009))
