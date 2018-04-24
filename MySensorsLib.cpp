@@ -36,6 +36,53 @@ MyMessage::MyMessage(uint8_t _sensor, uint8_t _type)
   sensor = _sensor;
   type   = _type;
 }
+/*
+  uint8_t version_length;    
+  // 2 bit - Protocol version
+  // 1 bit - Signed flag
+  // 5 bit - Length of payload
+  uint8_t command_ack_payload;
+  // 3 bit - Command type
+  // 1 bit - Request an ack - Indicator that receiver should send an ack back.
+  // 1 bit - Is ack message - Indicator that this is the actual ack message.
+  // 3 bit - Payload data type
+  uint8_t type;              // 8 bit - Type varies depending on command
+  uint8_t sensor;            // 8 bit - Id of sensor that this message concerns.
+
+  // Each message can transfer a payload. We add one extra byte for string
+  // terminator \0 to be "printable" this is not transferred OTA
+  // This union is used to simplify the construction of the binary data types transferred.
+  union {
+    uint8_t bValue;
+    uint16_t uiValue;
+    int16_t iValue;
+    uint32_t ulValue;
+    int32_t lValue;
+    struct { // Float messages
+      float fValue;
+      uint8_t fPrecision;   // Number of decimals when serializing
+    };
+    struct {  // Presentation messages
+      uint8_t version;    // Library version
+      uint8_t sensorType;   // Sensor type hint for controller, see table above
+    };
+    char data[MAX_PAYLOAD + 1];
+  } __attribute__((packed));
+#ifdef __cplusplus
+} __attribute__((packed));
+#else
+ */
+
+// whole message without payload
+MyMessage::MyMessage(uint8_t _node_id, uint8_t _sensor_id, uint8_t _command, bool ack, uint8_t _type)
+{
+  clear();
+  sensor = _sensor_id;
+  type   = _type;
+  miSetCommand(_command);
+  miSetPayloadType(P_STRING);
+  miSetAck(ack);
+}
 
 void MyMessage::clear()
 {

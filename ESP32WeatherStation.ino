@@ -3,6 +3,7 @@
  */
 
 #include <WiFi.h>
+#include <WiFiUDP.h>
 #include <ESPmDNS.h>
 #include <ESP32WebServer.h>
 #include <WiFiClient.h>
@@ -60,6 +61,9 @@ BME280I2C bme(settings);
 const int UPDATE_INTERVAL_s = 10;
 Ticker bmeDataUpdater;
 
+// UDP Client
+WiFiUDP udpClient;
+
 void bmeUpdateData()
 {
   float temp(NAN), hum(NAN), pres(NAN);
@@ -67,11 +71,8 @@ void bmeUpdateData()
   BME280::TempUnit tempUnit(BME280::TempUnit_Celsius);
   BME280::PresUnit presUnit(BME280::PresUnit_hPa);
   
-  // bme.read(pres, temp, hum, tempUnit, presUnit);
-  pres = 988.16;
-  hum = 30.23;
-  temp = 27.12;
-  
+  bme.read(pres, temp, hum, tempUnit, presUnit);
+    
   Serial.print("Temp: ");
   Serial.print(temp);
   Serial.print("°"+ String(tempUnit == BME280::TempUnit_Celsius ? 'C' :'F'));
@@ -82,19 +83,33 @@ void bmeUpdateData()
   Serial.print(pres);
   Serial.println("hPa");
 
-  /* Test sending reports over UDP packed as MySensors messages */
   MyMessage messageTemp(1,V_TEMP);
   messageTemp.set(temp,2);
   MyMessage messageHum(2,V_HUM);
   messageHum.set(hum,2);
   MyMessage messagePres(3,V_PRESSURE);
   messagePres.set(pres,2);
-    
+
+  IPAddress ipBCAddress(255,255,255,255);
+  char* DataBuffer;
+  DataBuffer = messageTemp.protocolFormat();
+  /* Test sending reports over UDP packed as MySensors messages */
+  udpClient.beginPacket(ipBCAddress,9009);
+  // udpClient.write(DataBuffer,sizeof(DataBuffer));
+  for (int i=0;i<sizeof(DataBuffer);i++)
+  {
+    if (DataBuffer[i]!='/n') udpClient.write((unsigned char)DataBuffer[i]);
+    else break;
+  }
+  udpClient.endPacket();
+  
+  /*
   Serial.println("-- UDP Messages --");
   Serial.println(messageTemp.protocolFormat());
   Serial.println(messageHum.protocolFormat());
   Serial.println(messagePres.protocolFormat());
   Serial.println("-- END --");
+  */
 
   /*
   // deep sleep after update data
@@ -380,6 +395,12 @@ void setup_CL()
   // attach data updates
   if (senseMode!=SENSE_NONE) bmeDataUpdater.attach(UPDATE_INTERVAL_s,bmeUpdateData);
   blueLEDBlinker.detach();
+
+  // start UDP Client
+  if (udpClient.begin(9009))
+  {
+    Serial.println("UDP Client started...");
+  }
 
   // setup mDNS
   if (MDNS.begin("esp32"))

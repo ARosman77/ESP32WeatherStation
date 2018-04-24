@@ -293,6 +293,8 @@ public:
 
   MyMessage(uint8_t sensor, uint8_t type);
 
+  MyMessage(uint8_t _node_id, uint8_t _sensor_id, uint8_t _command, bool ack, uint8_t _type);
+
   char i2h(uint8_t i) const;
 
   /**
