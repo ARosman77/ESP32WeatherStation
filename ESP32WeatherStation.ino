@@ -64,6 +64,20 @@ Ticker bmeDataUpdater;
 // UDP Client
 WiFiUDP udpClient;
 
+void sendMyMsgOverUDP(IPAddress ip, int port, MyMessage message)
+{
+  char* DataBuffer;
+  DataBuffer = message.protocolFormat();
+  /* Test sending reports over UDP packed as MySensors messages */
+  udpClient.beginPacket(ip,port);
+  for (int i=0;i<sizeof(DataBuffer);i++)
+  {
+    if (DataBuffer[i]!='/n') udpClient.write((unsigned char)DataBuffer[i]);
+    else break;
+  }
+  udpClient.endPacket();
+}
+
 void bmeUpdateData()
 {
   float temp(NAN), hum(NAN), pres(NAN);
@@ -83,6 +97,22 @@ void bmeUpdateData()
   Serial.print(pres);
   Serial.println("hPa");
 
+  // UDP broadcast address / port
+  IPAddress ipBCAddress(255,255,255,255);
+  int nBCPort = 9009;
+
+  // my MAC address
+  String mac = WiFi.macAddress();
+
+  // presentation / init messages
+  // MyMessage::MyMessage(uint8_t _node_id, uint8_t _sensor_id, uint8_t _command, bool ack, uint8_t _type)
+  MyMessage msgInit(0,0,C_INTERNAL,false,I_ID_REQUEST);
+  msgInit.set(mac);
+  sendMyMsgOverUDP(ipBCAddress,nBCPort,msgInit);
+
+  // wait for ID, then begin presenting sensors
+
+  // update data messages
   MyMessage messageTemp(1,V_TEMP);
   messageTemp.set(temp,2);
   MyMessage messageHum(2,V_HUM);
@@ -90,19 +120,10 @@ void bmeUpdateData()
   MyMessage messagePres(3,V_PRESSURE);
   messagePres.set(pres,2);
 
-  IPAddress ipBCAddress(255,255,255,255);
-  char* DataBuffer;
-  DataBuffer = messageTemp.protocolFormat();
-  /* Test sending reports over UDP packed as MySensors messages */
-  udpClient.beginPacket(ipBCAddress,9009);
-  // udpClient.write(DataBuffer,sizeof(DataBuffer));
-  for (int i=0;i<sizeof(DataBuffer);i++)
-  {
-    if (DataBuffer[i]!='/n') udpClient.write((unsigned char)DataBuffer[i]);
-    else break;
-  }
-  udpClient.endPacket();
-  
+  sendMyMsgOverUDP(ipBCAddress,nBCPort,messageTemp);
+  sendMyMsgOverUDP(ipBCAddress,nBCPort,messageHum);
+  sendMyMsgOverUDP(ipBCAddress,nBCPort,messagePres);
+    
   /*
   Serial.println("-- UDP Messages --");
   Serial.println(messageTemp.protocolFormat());

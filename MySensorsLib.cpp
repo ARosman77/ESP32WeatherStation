@@ -77,11 +77,12 @@ MyMessage::MyMessage(uint8_t _sensor, uint8_t _type)
 MyMessage::MyMessage(uint8_t _node_id, uint8_t _sensor_id, uint8_t _command, bool ack, uint8_t _type)
 {
   clear();
+  sender = _node_id;
   sensor = _sensor_id;
-  type   = _type;
   miSetCommand(_command);
-  miSetPayloadType(P_STRING);
   miSetAck(ack);
+  type   = _type;
+  miSetPayloadType(P_STRING);
 }
 
 void MyMessage::clear()
