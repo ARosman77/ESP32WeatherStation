@@ -243,6 +243,12 @@ MyMessage& MyMessage::setDestination(uint8_t _destination)
   return *this;
 }
 
+MyMessage& MyMessage::setSender(uint8_t _sender)
+{
+  sender = _sender;
+  return *this;
+}
+
 // Set payload
 MyMessage& MyMessage::set(void* value, uint8_t length)
 {

@@ -75,12 +75,10 @@ void sendMyMsgOverUDP(IPAddress ip, int port, MyMessage message)
   udpClient.beginPacket(ip,port);
   for (int i=0;i<MY_GATEWAY_MAX_SEND_LENGTH;i++)
   {
-    if (DataBuffer[i]!='/n') udpClient.write((unsigned char)DataBuffer[i]);
+    if (DataBuffer[i]!=0x00) udpClient.write((unsigned char)DataBuffer[i]);
     else break;
   }
   udpClient.endPacket();
-  Serial.print("PacketSent: ");
-  Serial.println(DataBuffer);
 }
 
 void bmeUpdateData()
@@ -114,22 +112,16 @@ void bmeUpdateData()
 
   // my MAC address
   String mac = WiFi.macAddress();
-
+  
   // presentation / init messages
   // MyMessage::MyMessage(uint8_t _node_id, uint8_t _sensor_id, uint8_t _command, bool ack, uint8_t _type)
   MyMessage msgInit(0,0,C_INTERNAL,false,I_ID_REQUEST);
-  msgInit.set(mac);
+  msgInit.set(mac.c_str());
   sendMyMsgOverUDP(ipBCAddress,nBCPort,msgInit);
 
   // wait for ID, then begin presenting sensors
   while (udpClient.parsePacket()==0);
-  Serial.print("Received packet of size ");
-  Serial.println(udpClient.available());
-  Serial.print("From ");
   IPAddress remoteIp = udpClient.remoteIP();
-  Serial.print(remoteIp);
-  Serial.print(", port ");
-  Serial.println(udpClient.remotePort());
   // read the packet into packetBufffer
   char packetBuffer[MY_GATEWAY_MAX_SEND_LENGTH];
   int len = udpClient.read(packetBuffer, MY_GATEWAY_MAX_SEND_LENGTH);
@@ -137,20 +129,36 @@ void bmeUpdateData()
   {
     packetBuffer[len] = 0;
   }
-  Serial.println("Contents:");
-  Serial.println(packetBuffer);
+
+  MyMessage msgResponse;
+  msgResponse.protocolParse(packetBuffer);
+  uint8_t id = msgResponse.getByte();
+
+  // present all sensors
+  MyMessage msgPresTemp(id,1,C_PRESENTATION,false,S_TEMP);
+  msgPresTemp.set(mac.c_str());
+  sendMyMsgOverUDP(ipBCAddress,nBCPort,msgPresTemp);
+  MyMessage msgPresHum(id,1,C_PRESENTATION,false,S_HUM);
+  msgPresHum.set(mac.c_str());
+  sendMyMsgOverUDP(ipBCAddress,nBCPort,msgPresHum);
+  MyMessage msgPresPres(id,1,C_PRESENTATION,false,S_BARO);
+  msgPresPres.set(mac.c_str());
+  sendMyMsgOverUDP(ipBCAddress,nBCPort,msgPresPres);
 
   // update data messages
   MyMessage messageTemp(1,V_TEMP);
   messageTemp.set(temp,2);
+  messageTemp.setSender(id);
   MyMessage messageHum(2,V_HUM);
   messageHum.set(hum,2);
+  messageHum.setSender(id);
   MyMessage messagePres(3,V_PRESSURE);
+  messagePres.setSender(id);
   messagePres.set(pres,2);
 
-  //sendMyMsgOverUDP(ipBCAddress,nBCPort,messageTemp);
-  //sendMyMsgOverUDP(ipBCAddress,nBCPort,messageHum);
-  //sendMyMsgOverUDP(ipBCAddress,nBCPort,messagePres);
+  sendMyMsgOverUDP(ipBCAddress,nBCPort,messageTemp);
+  sendMyMsgOverUDP(ipBCAddress,nBCPort,messageHum);
+  sendMyMsgOverUDP(ipBCAddress,nBCPort,messagePres);
     
   /*
   Serial.println("-- UDP Messages --");

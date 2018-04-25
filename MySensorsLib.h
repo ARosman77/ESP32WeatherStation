@@ -333,6 +333,7 @@ public:
   MyMessage& setType(uint8_t type);
   MyMessage& setSensor(uint8_t sensor);
   MyMessage& setDestination(uint8_t destination);
+  MyMessage& setSender(uint8_t _sender);
 
   // Setters for payload
   MyMessage& set(void* payload, uint8_t length);
